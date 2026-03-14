@@ -60,3 +60,8 @@ jobs:
           files: |
             target/release/alttab-*-linux-x86_64.tar.gz
             target/release/alttab-*-linux-x86_64.tar.gz.sha256
+
+      - name: Publish to crates.io
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

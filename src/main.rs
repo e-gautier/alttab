@@ -101,6 +101,11 @@ pub struct AppState {
 impl AppState {
     fn show_overlay(&mut self) {
         if self.overlay_visible {
+            // Already visible: cycle to the next window (Alt+Tab again)
+            self.cycle_selection(true);
+            if self.needs_redraw {
+                self.draw();
+            }
             return;
         }
 

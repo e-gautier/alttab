@@ -256,4 +256,6 @@ To solve this, `alttab` runs as a daemon that stays alive and watches activation
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+The embedded [DroidSans](https://www.droidfonts.com/) font is licensed under the Apache License 2.0 (Copyright 2008 The Android Open Source Project) — see [fonts/LICENSE-DroidSans](fonts/LICENSE-DroidSans).

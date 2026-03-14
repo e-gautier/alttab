@@ -2,6 +2,13 @@
 name = "alttab"
 version = "0.1.0"
 edition = "2021"
+description = "Fast alt-tab window switcher for Wayland compositors (Sway)"
+license = "MIT"
+repository = "https://github.com/e-gautier/alttab"
+homepage = "https://github.com/e-gautier/alttab"
+readme = "README.md"
+keywords = ["wayland", "sway", "window-switcher", "alt-tab", "wlroots"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 wayland-client = "0.31"
