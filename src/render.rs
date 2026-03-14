@@ -1,6 +1,6 @@
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, PixmapMut, Transform};
 
-use crate::config::{parse_hex_color, Config};
+use crate::config::{Config, Rgba};
 use crate::font::FontRenderer;
 use crate::icons::IconData;
 use crate::toplevel::ToplevelInfo;
@@ -20,18 +20,21 @@ pub fn calc_overlay_size(num_windows: usize, config: &Config) -> (u32, u32) {
     let padding = config.layout.padding;
     let item_h = config.layout.item_height;
     let item_sp = config.layout.item_spacing;
-    let height = padding * 2 + (num_windows as u32) * (item_h + item_sp) - item_sp;
+    let height = padding
+        .saturating_mul(2)
+        .saturating_add((num_windows as u32).saturating_mul(item_h.saturating_add(item_sp)))
+        .saturating_sub(item_sp);
     let height = height.max(80).min(config.layout.max_height);
     (width, height)
 }
 
-fn color_from_hex(hex: &str, fallback: (u8, u8, u8, u8)) -> Color {
-    let (r, g, b, a) = parse_hex_color(hex).unwrap_or(fallback);
+fn color_from_rgba(rgba: Rgba) -> Color {
+    let (r, g, b, a) = rgba;
     Color::from_rgba8(r, g, b, a)
 }
 
-fn argb_from_hex(hex: &str, fallback: (u8, u8, u8, u8)) -> u32 {
-    let (r, g, b, a) = parse_hex_color(hex).unwrap_or(fallback);
+fn argb_from_rgba(rgba: Rgba) -> u32 {
+    let (r, g, b, a) = rgba;
     (a as u32) << 24 | (r as u32) << 16 | (g as u32) << 8 | (b as u32)
 }
 
@@ -48,14 +51,20 @@ pub fn render_overlay(
     font: &mut FontRenderer,
 ) {
     let Some(mut pixmap) = PixmapMut::from_bytes(canvas, width, height) else {
+        log::error!(
+            "Failed to create pixmap ({}x{}, buffer len={})",
+            width,
+            height,
+            canvas.len()
+        );
         return;
     };
 
-    let bg = color_from_hex(&config.colors.background, (30, 30, 30, 230));
-    let item_bg = color_from_hex(&config.colors.item, (50, 50, 50, 255));
-    let sel_bg = color_from_hex(&config.colors.selected, (60, 120, 216, 255));
-    let title_color = argb_from_hex(&config.colors.title, (255, 255, 255, 255));
-    let appid_color = argb_from_hex(&config.colors.app_id, (170, 170, 170, 255));
+    let bg = color_from_rgba(config.colors.background);
+    let item_bg = color_from_rgba(config.colors.item);
+    let sel_bg = color_from_rgba(config.colors.selected);
+    let title_color = argb_from_rgba(config.colors.title);
+    let appid_color = argb_from_rgba(config.colors.app_id);
 
     let padding = config.layout.padding as f32;
     let item_h = config.layout.item_height as f32;
@@ -116,6 +125,13 @@ pub fn render_overlay(
             );
         }
 
+        // Compute dynamic Y positions for two-line text within the item
+        // Title goes in the upper portion, app_id in the lower
+        let total_text_height = TITLE_FONT_SIZE + APPID_FONT_SIZE;
+        let text_top_padding = ((item_h - total_text_height) / 2.0).max(2.0);
+        let title_y = (y + text_top_padding) as u32;
+        let appid_y = (y + text_top_padding + TITLE_FONT_SIZE + 2.0) as u32;
+
         // Truncate title to fit within available width
         let title = truncate_to_width(&window.title, TITLE_FONT_SIZE, max_text_w, font);
 
@@ -126,7 +142,7 @@ pub fn render_overlay(
             width,
             height,
             text_x as u32,
-            (y + 6.0) as u32,
+            title_y,
             &title,
             title_color,
             TITLE_FONT_SIZE,
@@ -142,7 +158,7 @@ pub fn render_overlay(
             width,
             height,
             text_x as u32,
-            (y + 26.0) as u32,
+            appid_y,
             &app_id,
             appid_color,
             APPID_FONT_SIZE,
@@ -201,7 +217,15 @@ fn draw_rounded_rect(pixmap: &mut PixmapMut, x: f32, y: f32, w: f32, h: f32, r: 
     pb.quad_to(x, y, x + r, y);
     pb.close();
 
-    let path = pb.finish().unwrap();
+    let Some(path) = pb.finish() else {
+        log::warn!(
+            "Failed to build rounded rect path (w={}, h={}, r={})",
+            w,
+            h,
+            r
+        );
+        return;
+    };
     let mut paint = Paint::default();
     paint.set_color(color);
     paint.anti_alias = true;

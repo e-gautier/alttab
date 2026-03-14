@@ -57,7 +57,7 @@ impl ToplevelState {
         id
     }
 
-    fn get_id(&self, handle: &ZwlrForeignToplevelHandleV1) -> Option<u32> {
+    pub fn get_id(&self, handle: &ZwlrForeignToplevelHandleV1) -> Option<u32> {
         self.handle_ids
             .iter()
             .find(|(h, _)| h == handle)
@@ -125,6 +125,10 @@ impl ToplevelState {
             self.toplevels.iter_mut().find(|(h, _, _)| h == handle)
         {
             *committed = pending.clone();
+            // Reset pending to committed state for defensive correctness
+            // (protocol guarantees all properties are re-sent before each Done,
+            // but this protects against non-conformant compositors)
+            *pending = committed.clone();
         }
 
         if let Some(id) = activated_id {
@@ -140,6 +144,25 @@ impl ToplevelState {
         }
         self.handle_ids.retain(|(h, _)| h != handle);
         self.toplevels.retain(|(h, _, _)| h != handle);
+    }
+
+    /// Get the index of a window ID in the MRU-ordered window list.
+    pub fn index_of_id(&self, id: u32) -> Option<usize> {
+        let windows = self.window_list();
+        for (i, (handle, _)) in windows.iter().enumerate() {
+            if self.get_id(handle) == Some(id) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Get the window ID at a given index in the MRU-ordered window list.
+    pub fn id_at_index(&self, index: usize) -> Option<u32> {
+        let windows = self.window_list();
+        windows
+            .get(index)
+            .and_then(|(handle, _)| self.get_id(handle))
     }
 
     /// Call after the initial roundtrip to ensure the currently-activated window
@@ -280,16 +303,15 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, ()> for AppState {
                 log::debug!("Toplevel closed");
                 state.toplevel_state.remove(proxy);
                 proxy.destroy();
-                // If overlay is showing, we may need to adjust selection
+                // If overlay is showing, we may need to adjust
                 if state.overlay_visible {
                     let count = state.toplevel_state.window_list().len();
                     if count < 2 {
                         // Not enough windows to switch, close overlay
                         state.close_overlay(false);
                     } else {
-                        if state.selected_index >= count {
-                            state.selected_index = count - 1;
-                        }
+                        // If the selected window was closed, selected_id will no longer
+                        // resolve to an index; cycle_selection or draw will fall back to 0.
                         state.needs_redraw = true;
                     }
                 }

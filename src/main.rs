@@ -52,6 +52,7 @@ use crate::toplevel::ToplevelState;
 #[derive(Debug)]
 enum DaemonMsg {
     ShowOverlay,
+    SocketBindFailed,
 }
 
 /// Main application state.
@@ -76,7 +77,7 @@ pub struct AppState {
     // Overlay state
     pub layer_surface: Option<LayerSurface>,
     pub overlay_visible: bool,
-    pub selected_index: usize,
+    pub selected_id: Option<u32>,
     pub needs_redraw: bool,
     pub configured: bool,
     pub width: u32,
@@ -116,7 +117,9 @@ impl AppState {
         }
 
         // Start with the second window selected (the one to switch to)
-        self.selected_index = 1;
+        self.selected_id = windows
+            .get(1)
+            .and_then(|(h, _)| self.toplevel_state.get_id(h));
 
         let (w, h) = calc_overlay_size(windows.len(), &self.config);
         self.width = w;
@@ -156,25 +159,31 @@ impl AppState {
         }
 
         if activate {
-            let windows = self.toplevel_state.window_list();
-            if let Some((handle, info)) = windows.get(self.selected_index) {
-                log::info!("Activating window: {}", info.title);
-                if info.is_minimized {
-                    handle.unset_minimized();
-                }
-                if let Some(seat) = &self.seat {
-                    handle.activate(seat);
+            if let Some(sel_id) = self.selected_id {
+                let windows = self.toplevel_state.window_list();
+                if let Some((handle, info)) = windows
+                    .iter()
+                    .find(|(h, _)| self.toplevel_state.get_id(h) == Some(sel_id))
+                {
+                    log::info!("Activating window: {}", info.title);
+                    if info.is_minimized {
+                        handle.unset_minimized();
+                    }
+                    if let Some(seat) = &self.seat {
+                        handle.activate(seat);
+                    }
+                } else {
+                    log::warn!("Selected window id={} no longer exists", sel_id);
                 }
             }
         }
 
         // Destroy overlay surface
-        if let Some(layer) = self.layer_surface.take() {
-            drop(layer);
-        }
+        self.layer_surface.take();
         self.current_buffer = None;
         self.overlay_visible = false;
         self.configured = false;
+        self.selected_id = None;
 
         // Do NOT exit — daemon continues tracking MRU
         log::info!("Overlay closed (activate={})", activate);
@@ -195,22 +204,34 @@ impl AppState {
 
         // Ensure pool is large enough
         if self.pool.len() < pool_size {
-            self.pool.resize(pool_size).expect("Failed to resize pool");
+            if let Err(e) = self.pool.resize(pool_size) {
+                log::error!("Failed to resize SHM pool: {}", e);
+                return;
+            }
         }
 
-        let (buffer, canvas) = self
-            .pool
-            .create_buffer(
-                self.width as i32,
-                self.height as i32,
-                stride,
-                wl_shm::Format::Argb8888,
-            )
-            .expect("Failed to create buffer");
+        let (buffer, canvas) = match self.pool.create_buffer(
+            self.width as i32,
+            self.height as i32,
+            stride,
+            wl_shm::Format::Argb8888,
+        ) {
+            Ok(bc) => bc,
+            Err(e) => {
+                log::error!("Failed to create SHM buffer: {}", e);
+                return;
+            }
+        };
 
         // Get window list for rendering
         let windows = self.toplevel_state.window_list();
         let infos: Vec<&toplevel::ToplevelInfo> = windows.iter().map(|(_, info)| *info).collect();
+
+        // Resolve selected_id to a display index
+        let selected_index = self
+            .selected_id
+            .and_then(|id| self.toplevel_state.index_of_id(id))
+            .unwrap_or(0);
 
         // Pre-populate the icon cache for all app_ids (triggers loading if not cached)
         let app_ids: Vec<String> = infos.iter().map(|info| info.app_id.clone()).collect();
@@ -229,7 +250,7 @@ impl AppState {
             self.height,
             &infos,
             &icons,
-            self.selected_index,
+            selected_index,
             &self.config,
             &mut self.font_renderer,
         );
@@ -238,9 +259,10 @@ impl AppState {
         layer
             .wl_surface()
             .damage_buffer(0, 0, self.width as i32, self.height as i32);
-        buffer
-            .attach_to(layer.wl_surface())
-            .expect("Failed to attach buffer");
+        if let Err(e) = buffer.attach_to(layer.wl_surface()) {
+            log::error!("Failed to attach buffer: {}", e);
+            return;
+        }
         layer.commit();
 
         self.current_buffer = Some(buffer);
@@ -252,11 +274,17 @@ impl AppState {
         if count == 0 {
             return;
         }
-        if forward {
-            self.selected_index = (self.selected_index + 1) % count;
+        // Resolve current ID to an index, defaulting to 0 if not found
+        let current_index = self
+            .selected_id
+            .and_then(|id| self.toplevel_state.index_of_id(id))
+            .unwrap_or(0);
+        let new_index = if forward {
+            (current_index + 1) % count
         } else {
-            self.selected_index = (self.selected_index + count - 1) % count;
-        }
+            (current_index + count - 1) % count
+        };
+        self.selected_id = self.toplevel_state.id_at_index(new_index);
         self.needs_redraw = true;
     }
 }
@@ -368,11 +396,14 @@ impl SeatHandler for AppState {
         capability: Capability,
     ) {
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            let keyboard = self
-                .seat_state
-                .get_keyboard(qh, &seat, None)
-                .expect("Failed to create keyboard");
-            self.keyboard = Some(keyboard);
+            match self.seat_state.get_keyboard(qh, &seat, None) {
+                Ok(keyboard) => {
+                    self.keyboard = Some(keyboard);
+                }
+                Err(e) => {
+                    log::error!("Failed to create keyboard: {}", e);
+                }
+            }
         }
         if self.seat.is_none() {
             self.seat = Some(seat);
@@ -661,7 +692,7 @@ fn main() {
         toplevel_state: ToplevelState::new(),
         layer_surface: None,
         overlay_visible: false,
-        selected_index: 0,
+        selected_id: None,
         needs_redraw: false,
         configured: false,
         width: 500,
@@ -751,9 +782,16 @@ fn main() {
     // Insert channel source into calloop
     loop_handle
         .insert_source(channel, |event, _, state: &mut AppState| {
-            if let calloop::channel::Event::Msg(DaemonMsg::ShowOverlay) = event {
-                log::info!("Received ShowOverlay message");
-                state.show_overlay();
+            if let calloop::channel::Event::Msg(msg) = event {
+                match msg {
+                    DaemonMsg::ShowOverlay => {
+                        log::info!("Received ShowOverlay message");
+                        state.show_overlay();
+                    }
+                    DaemonMsg::SocketBindFailed => {
+                        log::error!("Socket listener failed to bind — IPC is unavailable. The daemon cannot receive --show commands.");
+                    }
+                }
             }
         })
         .expect("Failed to insert channel source");
@@ -766,6 +804,7 @@ fn main() {
             Ok(l) => l,
             Err(e) => {
                 log::error!("Failed to bind Unix socket at {:?}: {}", sock_path_clone, e);
+                let _ = sender_clone.send(DaemonMsg::SocketBindFailed);
                 return;
             }
         };

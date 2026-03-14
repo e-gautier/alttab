@@ -56,9 +56,7 @@ impl IconCache {
 
         // Preferred sizes for our use case (we render at ~32x32)
         // Search larger sizes first (we'll scale down)
-        let sizes = [
-            "48x48", "64x64", "32x32", "128x128", "256x256", "24x24", "scalable",
-        ];
+        let sizes = ["48x48", "64x64", "32x32", "128x128", "256x256", "24x24"];
 
         // User local
         if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
@@ -122,10 +120,6 @@ impl IconCache {
 
         // Step 3: Search icon directories for the icon name
         for dir in &self.icon_dirs {
-            // Skip scalable directory (we only handle PNG)
-            if dir.to_str().is_some_and(|s| s.contains("scalable")) {
-                continue;
-            }
             let path = dir.join(format!("{}.png", icon_name));
             if path.exists() {
                 if let Some(icon) = self.load_png(&path) {
@@ -159,16 +153,12 @@ impl IconCache {
                     continue;
                 }
 
-                // Check filename match (case-insensitive)
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if stem.to_lowercase() == app_id_lower {
-                        if let Some(name) = Self::read_icon_from_desktop(&path) {
-                            return Some(name);
-                        }
-                    }
-                }
+                let stem_matches = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|stem| stem.to_lowercase() == app_id_lower);
 
-                // Check StartupWMClass
+                // Read the file once and check both filename match and StartupWMClass
                 if let Ok(contents) = fs::read_to_string(&path) {
                     let mut has_matching_wm_class = false;
                     let mut icon_name = None;
@@ -179,13 +169,14 @@ impl IconCache {
                             }
                         }
                         if let Some(val) = line.strip_prefix("Icon=") {
-                            icon_name = Some(val.trim().to_string());
+                            let val = val.trim();
+                            if !val.is_empty() {
+                                icon_name = Some(val.to_string());
+                            }
                         }
                     }
-                    if has_matching_wm_class {
-                        if let Some(name) = icon_name {
-                            return Some(name);
-                        }
+                    if (stem_matches || has_matching_wm_class) && icon_name.is_some() {
+                        return icon_name;
                     }
                 }
             }

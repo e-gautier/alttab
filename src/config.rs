@@ -1,28 +1,77 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
+/// Parsed RGBA color tuple.
+pub type Rgba = (u8, u8, u8, u8);
+
 /// Top-level configuration.
-#[derive(Debug, Deserialize, Clone, Default)]
-#[serde(default)]
+#[derive(Debug, Clone)]
 pub struct Config {
-    pub colors: Colors,
+    pub colors: ResolvedColors,
     pub layout: Layout,
 }
 
-/// Color configuration. All colors are specified as hex strings: "#RRGGBB" or "#RRGGBBAA".
+/// Resolved color values (parsed from hex strings at load time).
+#[derive(Debug, Clone)]
+pub struct ResolvedColors {
+    pub background: Rgba,
+    pub item: Rgba,
+    pub selected: Rgba,
+    pub title: Rgba,
+    pub app_id: Rgba,
+}
+
+impl Default for ResolvedColors {
+    fn default() -> Self {
+        Self {
+            background: (30, 30, 30, 230),
+            item: (50, 50, 50, 255),
+            selected: (60, 120, 216, 255),
+            title: (255, 255, 255, 255),
+            app_id: (170, 170, 170, 255),
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            colors: ResolvedColors::default(),
+            layout: Layout::default(),
+        }
+    }
+}
+
+/// Raw color configuration as deserialized from TOML.
+/// All colors are specified as hex strings: "#RRGGBB" or "#RRGGBBAA".
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
-pub struct Colors {
-    /// Overlay background color.
-    pub background: String,
-    /// Normal item background color.
-    pub item: String,
-    /// Selected item background color.
-    pub selected: String,
-    /// Title text color.
-    pub title: String,
-    /// App ID (subtitle) text color.
-    pub app_id: String,
+struct RawColors {
+    background: String,
+    item: String,
+    selected: String,
+    title: String,
+    app_id: String,
+}
+
+/// Raw top-level config for deserialization.
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default)]
+struct RawConfig {
+    colors: RawColors,
+    layout: Layout,
+}
+
+impl Default for RawColors {
+    fn default() -> Self {
+        Self {
+            background: "#1E1E1EE6".to_string(),
+            item: "#323232".to_string(),
+            selected: "#3C78D8".to_string(),
+            title: "#FFFFFF".to_string(),
+            app_id: "#AAAAAA".to_string(),
+        }
+    }
 }
 
 /// Layout configuration.
@@ -45,18 +94,6 @@ pub struct Layout {
     pub item_corner_radius: f32,
 }
 
-impl Default for Colors {
-    fn default() -> Self {
-        Self {
-            background: "#1E1E1EE6".to_string(),
-            item: "#323232".to_string(),
-            selected: "#3C78D8".to_string(),
-            title: "#FFFFFF".to_string(),
-            app_id: "#AAAAAA".to_string(),
-        }
-    }
-}
-
 impl Default for Layout {
     fn default() -> Self {
         Self {
@@ -72,7 +109,7 @@ impl Default for Layout {
 }
 
 /// Parse a hex color string like "#RRGGBB" or "#RRGGBBAA" into (r, g, b, a).
-pub fn parse_hex_color(s: &str) -> Option<(u8, u8, u8, u8)> {
+pub fn parse_hex_color(s: &str) -> Option<Rgba> {
     let s = s.strip_prefix('#').unwrap_or(s);
     match s.len() {
         6 => {
@@ -89,6 +126,62 @@ pub fn parse_hex_color(s: &str) -> Option<(u8, u8, u8, u8)> {
             Some((r, g, b, a))
         }
         _ => None,
+    }
+}
+
+/// Resolve raw hex color strings into RGBA tuples, using defaults for invalid values.
+fn resolve_colors(raw: &RawColors) -> ResolvedColors {
+    let defaults = ResolvedColors::default();
+    ResolvedColors {
+        background: parse_hex_color(&raw.background).unwrap_or(defaults.background),
+        item: parse_hex_color(&raw.item).unwrap_or(defaults.item),
+        selected: parse_hex_color(&raw.selected).unwrap_or(defaults.selected),
+        title: parse_hex_color(&raw.title).unwrap_or(defaults.title),
+        app_id: parse_hex_color(&raw.app_id).unwrap_or(defaults.app_id),
+    }
+}
+
+/// Validate and clamp layout values to sane ranges.
+fn validate_layout(layout: &mut Layout) {
+    let defaults = Layout::default();
+
+    if layout.width < 100 {
+        log::warn!(
+            "Layout width {} too small, using default {}",
+            layout.width,
+            defaults.width
+        );
+        layout.width = defaults.width;
+    }
+    if layout.max_height < 100 {
+        log::warn!(
+            "Layout max_height {} too small, using default {}",
+            layout.max_height,
+            defaults.max_height
+        );
+        layout.max_height = defaults.max_height;
+    }
+    if layout.item_height < 16 {
+        log::warn!(
+            "Layout item_height {} too small, using default {}",
+            layout.item_height,
+            defaults.item_height
+        );
+        layout.item_height = defaults.item_height;
+    }
+    if layout.corner_radius < 0.0 {
+        log::warn!(
+            "Layout corner_radius {} negative, using 0.0",
+            layout.corner_radius
+        );
+        layout.corner_radius = 0.0;
+    }
+    if layout.item_corner_radius < 0.0 {
+        log::warn!(
+            "Layout item_corner_radius {} negative, using 0.0",
+            layout.item_corner_radius
+        );
+        layout.item_corner_radius = 0.0;
     }
 }
 
@@ -112,10 +205,13 @@ pub fn load_config() -> Config {
     }
 
     match std::fs::read_to_string(&path) {
-        Ok(contents) => match toml::from_str::<Config>(&contents) {
-            Ok(config) => {
+        Ok(contents) => match toml::from_str::<RawConfig>(&contents) {
+            Ok(raw) => {
                 log::info!("Loaded config from {:?}", path);
-                config
+                let colors = resolve_colors(&raw.colors);
+                let mut layout = raw.layout;
+                validate_layout(&mut layout);
+                Config { colors, layout }
             }
             Err(e) => {
                 log::warn!(
