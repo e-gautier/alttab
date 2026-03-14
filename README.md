@@ -24,13 +24,44 @@ Single Rust binary, ~2.8MB stripped. Zero runtime dependencies beyond Wayland.
 - Sway (or any wlroots-based Wayland compositor with `wlr-foreign-toplevel-management` and `wlr-layer-shell` support)
 - `libxkbcommon` and `wayland` client libraries (runtime)
 
-## Build
+### Build dependencies
+
+Building from source (including `cargo install`) requires development headers for `libxkbcommon` and `wayland`:
+
+**Fedora:**
 
 ```sh
-cargo build --release
+sudo dnf install libxkbcommon-devel wayland-devel
 ```
 
-The binary is at `target/release/alttab`.
+**Debian/Ubuntu:**
+
+```sh
+sudo apt install libxkbcommon-dev libwayland-dev
+```
+
+**Arch Linux:**
+
+```sh
+sudo pacman -S libxkbcommon wayland
+```
+
+## Install
+
+### From crates.io
+
+```sh
+cargo install alttab
+```
+
+### From source
+
+```sh
+git clone https://github.com/e-gautier/alttab.git
+cd alttab
+cargo build --release
+# Binary is at target/release/alttab
+```
 
 ## Usage
 
