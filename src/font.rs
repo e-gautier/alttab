@@ -67,6 +67,7 @@ impl FontRenderer {
     /// - `text`: the string to render
     /// - `color`: packed ARGB u32 (same format as the rest of the renderer)
     /// - `size_px`: font size in pixels
+    #[allow(clippy::too_many_arguments)]
     pub fn draw_text(
         &mut self,
         data: &mut [u8],

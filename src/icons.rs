@@ -123,7 +123,7 @@ impl IconCache {
         // Step 3: Search icon directories for the icon name
         for dir in &self.icon_dirs {
             // Skip scalable directory (we only handle PNG)
-            if dir.to_str().map_or(false, |s| s.contains("scalable")) {
+            if dir.to_str().is_some_and(|s| s.contains("scalable")) {
                 continue;
             }
             let path = dir.join(format!("{}.png", icon_name));
@@ -155,7 +155,7 @@ impl IconCache {
             };
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.extension().map_or(false, |e| e == "desktop") {
+                if path.extension().is_none_or(|e| e != "desktop") {
                     continue;
                 }
 

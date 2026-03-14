@@ -8,7 +8,7 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
 use crate::AppState;
 
 /// Information about a single toplevel window.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ToplevelInfo {
     pub title: String,
     pub app_id: String,
@@ -16,19 +16,6 @@ pub struct ToplevelInfo {
     pub is_minimized: bool,
     pub is_fullscreen: bool,
     pub is_maximized: bool,
-}
-
-impl Default for ToplevelInfo {
-    fn default() -> Self {
-        Self {
-            title: String::new(),
-            app_id: String::new(),
-            is_activated: false,
-            is_minimized: false,
-            is_fullscreen: false,
-            is_maximized: false,
-        }
-    }
 }
 
 /// Tracks all open toplevel windows with MRU ordering.

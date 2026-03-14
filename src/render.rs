@@ -36,6 +36,7 @@ fn argb_from_hex(hex: &str, fallback: (u8, u8, u8, u8)) -> u32 {
 }
 
 /// Render the overlay into an ARGB8888 pixel buffer.
+#[allow(clippy::too_many_arguments)]
 pub fn render_overlay(
     canvas: &mut [u8],
     width: u32,

@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 /// Top-level configuration.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 #[serde(default)]
 pub struct Config {
     pub colors: Colors,
@@ -43,15 +43,6 @@ pub struct Layout {
     pub corner_radius: f32,
     /// Corner radius for individual items.
     pub item_corner_radius: f32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            colors: Colors::default(),
-            layout: Layout::default(),
-        }
-    }
 }
 
 impl Default for Colors {
