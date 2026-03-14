@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub type Rgba = (u8, u8, u8, u8);
 
 /// Top-level configuration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Config {
     pub colors: ResolvedColors,
     pub layout: Layout,
@@ -29,15 +29,6 @@ impl Default for ResolvedColors {
             selected: (60, 120, 216, 255),
             title: (255, 255, 255, 255),
             app_id: (170, 170, 170, 255),
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            colors: ResolvedColors::default(),
-            layout: Layout::default(),
         }
     }
 }
